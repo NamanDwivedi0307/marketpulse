@@ -24,7 +24,7 @@ class Environment(StrEnum):
 
 
 class FinnhubSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="FINNHUB_")
+    model_config = SettingsConfigDict(env_prefix="FINNHUB_", env_file=".env", extra="ignore")
 
     api_key: str = Field(default="", description="Finnhub API key, free tier")
     base_url: HttpUrl = Field(default=HttpUrl("https://finnhub.io/api/v1"))
