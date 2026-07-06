@@ -10,12 +10,12 @@ Failures on individual symbols are logged and skipped, not fatal -- one bad
 symbol or one transient network blip should never take down polling for the
 rest of the watchlist.
 """
-
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import signal
+from typing import Protocol
 
 import asyncpg
 import structlog
@@ -90,7 +90,14 @@ class QuotePoller:
         logger.info("poller_stopped")
 
 
-def install_signal_handlers(poller: QuotePoller, loop: asyncio.AbstractEventLoop) -> None:
+class Stoppable(Protocol):
+    """Anything with a request_stop() method -- QuotePoller and NewsPoller
+    both satisfy this structurally without needing a shared base class."""
+
+    def request_stop(self) -> None: ...
+
+
+def install_signal_handlers(poller: Stoppable, loop: asyncio.AbstractEventLoop) -> None:
     """Wire SIGINT/SIGTERM to a graceful stop instead of a hard kill.
 
     Without this, Ctrl+C during an in-flight poll cycle can leave a
