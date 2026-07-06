@@ -35,7 +35,7 @@ class FinnhubSettings(BaseSettings):
 
 
 class AlphaVantageSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="ALPHA_VANTAGE_")
+    model_config = SettingsConfigDict(env_prefix="ALPHA_VANTAGE_", env_file=".env", extra="ignore")
 
     api_key: str = Field(default="")
     base_url: HttpUrl = Field(default=HttpUrl("https://www.alphavantage.co/query"))
@@ -45,7 +45,7 @@ class AlphaVantageSettings(BaseSettings):
 
 
 class MarketauxSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="MARKETAUX_")
+    model_config = SettingsConfigDict(env_prefix="MARKETAUX_", env_file=".env", extra="ignore")
 
     api_key: str = Field(default="")
     base_url: HttpUrl = Field(default=HttpUrl("https://api.marketaux.com/v1"))
@@ -53,7 +53,7 @@ class MarketauxSettings(BaseSettings):
 
 
 class DatabaseSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="DATABASE_")
+    model_config = SettingsConfigDict(env_prefix="DATABASE_", env_file=".env", extra="ignore")
 
     host: str = Field(default="localhost")
     port: int = Field(default=5432)
