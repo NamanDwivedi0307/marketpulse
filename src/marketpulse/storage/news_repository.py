@@ -1,19 +1,29 @@
 """Persistence layer for NewsArticle data.
 
-An article and its entities are always written together in one transaction
--- an article with no entity rows, or entity rows pointing at a
-never-inserted article, would both be silently-broken states that are
-worse than just failing the whole write.
+Deliberately not a generic "repository base class" -- with one entity type
+so far, an abstraction over an abstraction just hides the actual SQL being
+run. Add a shared base once there are three or four of these with real
+duplication, not before.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import asyncpg
 
 from marketpulse.ingestion.marketaux_models import NewsArticle, NewsEntity
 from marketpulse.models.sentiment import SentimentLabel, SentimentScore
+
+
+@dataclass(frozen=True)
+class SimilarArticle:
+    uuid: str
+    title: str
+    sentiment_label: SentimentLabel
+    sentiment_confidence: float
+    similarity: float
 
 
 class NewsRepository:
@@ -163,6 +173,80 @@ class NewsRepository:
             )
             for row in rows
         ]
+
+    async def save_embedding(self, article_uuid: str, embedding: list[float]) -> None:
+        # pgvector expects the literal string format '[0.1,0.2,...]', not a
+        # Python list -- asyncpg has no native vector type, so we format it
+        # ourselves rather than depending on an extra pgvector-specific driver.
+        vector_literal = "[" + ",".join(str(x) for x in embedding) + "]"
+        await self._pool.execute(
+            "UPDATE news_articles SET embedding = $2 WHERE uuid = $1",
+            article_uuid,
+            vector_literal,
+        )
+
+    async def articles_missing_embeddings(self, limit: int = 50) -> list[NewsArticle]:
+        rows = await self._pool.fetch(
+            """
+            SELECT uuid, title, description, url, source, published_at
+            FROM news_articles
+            WHERE embedding IS NULL
+            ORDER BY published_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+        return [
+            NewsArticle(
+                uuid=row["uuid"],
+                title=row["title"],
+                description=row["description"],
+                url=row["url"],
+                source=row["source"],
+                published_at=row["published_at"],
+                entities=[],
+            )
+            for row in rows
+        ]
+
+    async def most_similar_articles(
+        self, embedding: list[float], limit: int = 5, exclude_uuid: str | None = None
+    ) -> list[SimilarArticle]:
+        """Find the most semantically similar scored articles to a given
+        embedding, using cosine distance via pgvector's <=> operator.
+
+        Only returns articles that already have a sentiment label -- an
+        unscored match is useless to the historical-event engine, since the
+        entire point is retrieving "what sentiment did similar past events
+        carry."
+        """
+        vector_literal = "[" + ",".join(str(x) for x in embedding) + "]"
+        rows = await self._pool.fetch(
+            """
+            SELECT uuid, title, sentiment_label, sentiment_confidence,
+                   1 - (embedding <=> $1) AS similarity
+            FROM news_articles
+            WHERE embedding IS NOT NULL
+              AND sentiment_label IS NOT NULL
+              AND ($2::text IS NULL OR uuid != $2)
+            ORDER BY embedding <=> $1
+            LIMIT $3
+            """,
+            vector_literal,
+            exclude_uuid,
+            limit,
+        )
+        return [
+            SimilarArticle(
+                uuid=row["uuid"],
+                title=row["title"],
+                sentiment_label=SentimentLabel(row["sentiment_label"]),
+                sentiment_confidence=row["sentiment_confidence"],
+                similarity=row["similarity"],
+            )
+            for row in rows
+        ]
+
     @staticmethod
     def _rows_to_articles(rows: list[asyncpg.Record]) -> list[NewsArticle]:
         # Rows are joined (one row per article-entity pair), so group back
@@ -188,6 +272,4 @@ class NewsRepository:
                     match_score=row["match_score"],
                 )
             )
-        # Preserve published_at DESC ordering from the query.
         return list(articles_by_uuid.values())
-
