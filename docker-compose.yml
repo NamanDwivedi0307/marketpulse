@@ -17,6 +17,20 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build: .
+    container_name: marketpulse-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_HOST: timescaledb
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
 volumes:
   timescale_data:
-  
+

@@ -78,6 +78,23 @@ cp .env.example .env
 docker compose up -d
 docker exec -it marketpulse-timescaledb psql -U marketpulse -d marketpulse \
   -c "CREATE EXTENSION IF NOT EXISTS vector;"
+## Running the API (fully containerized)
+
+The API and TimescaleDB both run in Docker -- no host-level Python needed
+to serve requests:
+
+\`\`\`bash
+docker compose up -d --build
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/quotes/AAPL
+curl -G http://127.0.0.1:8000/historical-precedent --data-urlencode "query=chip stocks surge"
+\`\`\`
+
+Interactive API docs (Swagger UI) are available at
+http://127.0.0.1:8000/docs once the stack is running.
+
+First build takes 10-15+ minutes (torch/transformers are heavy dependencies);
+subsequent builds are fast due to Docker layer caching.
 ```
 
 ## Running checks
