@@ -8,9 +8,12 @@ worse than just failing the whole write.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import asyncpg
 
 from marketpulse.ingestion.marketaux_models import NewsArticle, NewsEntity
+from marketpulse.models.sentiment import SentimentLabel, SentimentScore
 
 
 class NewsRepository:
@@ -75,6 +78,91 @@ class NewsRepository:
         result = await self._pool.fetchval("SELECT count(*) FROM news_articles")
         return int(result)
 
+    async def unscored_articles(self, limit: int = 50) -> list[NewsArticle]:
+        """Fetch articles that haven't had sentiment scored yet.
+
+        Returns bare articles (title/description populated, entities empty)
+        -- entities aren't needed for scoring text, and fetching them here
+        would mean an extra join for data the caller won't use.
+        """
+        rows = await self._pool.fetch(
+            """
+            SELECT uuid, title, description, url, source, published_at
+            FROM news_articles
+            WHERE sentiment_scored_at IS NULL
+            ORDER BY published_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+        return [
+            NewsArticle(
+                uuid=row["uuid"],
+                title=row["title"],
+                description=row["description"],
+                url=row["url"],
+                source=row["source"],
+                published_at=row["published_at"],
+                entities=[],
+            )
+            for row in rows
+        ]
+
+    async def save_sentiment(self, article_uuid: str, score: SentimentScore) -> None:
+        await self._pool.execute(
+            """
+            UPDATE news_articles
+            SET sentiment_label = $2,
+                sentiment_confidence = $3,
+                positive_prob = $4,
+                negative_prob = $5,
+                neutral_prob = $6,
+                sentiment_scored_at = $7
+            WHERE uuid = $1
+            """,
+            article_uuid,
+            score.label.value,
+            score.confidence,
+            score.positive_prob,
+            score.negative_prob,
+            score.neutral_prob,
+            datetime.now(UTC),
+        )
+
+    async def sentiment_for_symbol(
+        self, symbol: str, limit: int = 20
+    ) -> list[tuple[NewsArticle, SentimentLabel | None]]:
+        """Recent articles for a symbol, paired with their sentiment label
+        (None if not yet scored)."""
+        rows = await self._pool.fetch(
+            """
+            SELECT DISTINCT ON (a.uuid)
+                a.uuid, a.title, a.description, a.url, a.source, a.published_at,
+                a.sentiment_label
+            FROM news_articles a
+            JOIN article_entities e ON e.article_uuid = a.uuid
+            WHERE e.symbol = $1
+            ORDER BY a.uuid, a.published_at DESC
+            LIMIT $2
+            """,
+            symbol,
+            limit,
+        )
+        return [
+            (
+                NewsArticle(
+                    uuid=row["uuid"],
+                    title=row["title"],
+                    description=row["description"],
+                    url=row["url"],
+                    source=row["source"],
+                    published_at=row["published_at"],
+                    entities=[],
+                ),
+                SentimentLabel(row["sentiment_label"]) if row["sentiment_label"] else None,
+            )
+            for row in rows
+        ]
     @staticmethod
     def _rows_to_articles(rows: list[asyncpg.Record]) -> list[NewsArticle]:
         # Rows are joined (one row per article-entity pair), so group back
