@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.15.2-pg16
+        env:
+          POSTGRES_USER: marketpulse
+          POSTGRES_PASSWORD: marketpulse_dev_password
+          POSTGRES_DB: marketpulse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U marketpulse"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_HOST: localhost
+      DATABASE_PORT: 5432
+      DATABASE_NAME: marketpulse
+      DATABASE_USER: marketpulse
+      DATABASE_PASSWORD: marketpulse_dev_password
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Enable pgvector extension
+        run: |
+          PGPASSWORD=marketpulse_dev_password psql -h localhost -U marketpulse -d marketpulse \
+            -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type check
+        run: uv run mypy src
+
+      - name: Test
+        run: uv run pytest -v -m "not sanity"
