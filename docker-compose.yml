@@ -30,6 +30,31 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
+  quote-poller:
+    build: .
+    container_name: marketpulse-quote-poller
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_HOST: timescaledb
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    command: ["python", "scripts/run_poller.py", "AAPL", "MSFT", "GOOGL", "--interval", "60"]
+
+  news-poller:
+    build: .
+    container_name: marketpulse-news-poller
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_HOST: timescaledb
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    command: ["python", "scripts/run_news_poller.py", "AAPL", "MSFT", "GOOGL", "--interval", "1800"]
 
 volumes:
   timescale_data:

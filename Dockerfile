@@ -19,6 +19,7 @@ FROM python:3.12-slim AS runtime
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY src ./src
+COPY scripts ./scripts
 
 ENV PATH="/app/.venv/bin:$PATH" \
     ENVIRONMENT=production
