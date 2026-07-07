@@ -13,6 +13,8 @@ import pytest
 
 from marketpulse.models.sentiment import FinBertSentimentScorer, SentimentLabel
 
+pytestmark = pytest.mark.sanity
+
 
 @pytest.fixture(scope="module")
 def scorer() -> FinBertSentimentScorer:

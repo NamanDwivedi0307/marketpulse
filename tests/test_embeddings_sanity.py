@@ -11,6 +11,8 @@ import pytest
 
 from marketpulse.models.embeddings import EMBEDDING_DIMENSION, EmbeddingService
 
+pytestmark = pytest.mark.sanity
+
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b, strict=True))
@@ -58,7 +60,4 @@ def test_embed_many_matches_embed_one_at_a_time(embedder: EmbeddingService) -> N
     individual_vectors = [embedder.embed(t) for t in texts]
 
     for batch_v, individual_v in zip(batch_vectors, individual_vectors, strict=True):
-        # Batched vs individual encoding can differ by tiny floating-point
-        # noise depending on padding within the batch -- near-identical,
-        # not bit-for-bit identical, is the correct bar here.
         assert _cosine_similarity(batch_v, individual_v) > 0.999
