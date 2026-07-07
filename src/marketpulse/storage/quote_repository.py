@@ -8,6 +8,8 @@ duplication, not before.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import asyncpg
 
 from marketpulse.ingestion.finnhub_models import Quote
@@ -96,3 +98,36 @@ class QuoteRepository:
         )
         return int(result)
 
+    async def quote_at_or_after(self, symbol: str, timestamp: datetime) -> Quote | None:
+        """The earliest quote for symbol at or after the given timestamp.
+
+        Used for forward-return computation: given a news event at time T,
+        this finds the actual price snapshot closest to T (not necessarily
+        exactly T, since polling happens on a fixed interval, not on demand)
+        to use as the entry price for a return calculation.
+        """
+        row = await self._pool.fetchrow(
+            """
+            SELECT symbol, current_price, change, percent_change,
+                   high_of_day, low_of_day, open_price, previous_close, quoted_at
+            FROM quotes
+            WHERE symbol = $1 AND quoted_at >= $2
+            ORDER BY quoted_at ASC
+            LIMIT 1
+            """,
+            symbol,
+            timestamp,
+        )
+        if row is None:
+            return None
+        return Quote(
+            symbol=row["symbol"],
+            c=row["current_price"],
+            d=row["change"],
+            dp=row["percent_change"],
+            h=row["high_of_day"],
+            l=row["low_of_day"],
+            o=row["open_price"],
+            pc=row["previous_close"],
+            t=row["quoted_at"],
+        )
