@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI, HTTPException
 
+from marketpulse.api.middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from marketpulse.api.schemas import (
     HistoricalPrecedentResponse,
     NewsArticleResponse,
@@ -68,6 +69,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.add_middleware(RateLimitMiddleware, max_requests=30, window_seconds=60.0)
+app.add_middleware(RequestLoggingMiddleware)
 
 
 @app.get("/health")
