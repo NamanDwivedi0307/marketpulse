@@ -1,5 +1,8 @@
 # MarketPulse
 
+[![CI](https://github.com/NamanDwivedi0307/marketpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/NamanDwivedi0307/marketpulse/actions/workflows/ci.yml)
+
+
 A real-time AI-driven financial event and price-movement analysis platform.
 Ingests live market data and financial news, scores sentiment with FinBERT,
 embeds articles for semantic search, and retrieves historically similar
@@ -78,10 +81,10 @@ cp .env.example .env
 docker compose up -d
 docker exec -it marketpulse-timescaledb psql -U marketpulse -d marketpulse \
   -c "CREATE EXTENSION IF NOT EXISTS vector;"
-## Running the API (fully containerized)
+## Running the full stack (fully containerized)
 
-The API and TimescaleDB both run in Docker -- no host-level Python needed
-to serve requests:
+The API, both pollers, and TimescaleDB all run in Docker -- no host-level
+Python needed to serve requests or ingest data:
 
 \`\`\`bash
 docker compose up -d --build
