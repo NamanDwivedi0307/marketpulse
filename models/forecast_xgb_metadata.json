@@ -1,0 +1,21 @@
+{
+  "symbols": [
+    "AAPL",
+    "MSFT",
+    "GOOGL"
+  ],
+  "feature_columns": [
+    "return_1d",
+    "momentum_5d",
+    "momentum_10d",
+    "momentum_20d",
+    "volatility_10d",
+    "high_low_range",
+    "day_of_week",
+    "rsi_14"
+  ],
+  "train_rows": 1221,
+  "test_rows": 216,
+  "rmse": 2.022818903841573,
+  "directional_accuracy": 0.5
+}
