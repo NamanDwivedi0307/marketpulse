@@ -45,6 +45,8 @@ class HistoricalPrecedentResponse(BaseModel):
     matches: list[SimilarEventResponse]
     majority_sentiment: str | None
     agreement_ratio: str | None
+    average_return_pct: float | None = None
+    return_sample_size: int | None = None
 
 
 class ErrorResponse(BaseModel):

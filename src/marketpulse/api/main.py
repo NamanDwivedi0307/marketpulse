@@ -30,6 +30,7 @@ from marketpulse.config.settings import get_settings
 from marketpulse.models.embeddings import EmbeddingService
 from marketpulse.storage.migrator import run_migrations
 from marketpulse.storage.news_repository import NewsRepository
+from marketpulse.storage.outcome_repository import OutcomeRepository
 from marketpulse.storage.pool import create_pool
 from marketpulse.storage.quote_repository import QuoteRepository
 
@@ -51,6 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _state["pool"] = pool
     _state["quote_repo"] = QuoteRepository(pool)
     _state["news_repo"] = NewsRepository(pool)
+    _state["outcome_repo"] = OutcomeRepository(pool)
     # Embedding model loaded once at startup, not per-request -- loading it
     # per-request would add multi-second latency to every historical-match
     # query, defeating the purpose of an API.
@@ -118,7 +120,12 @@ async def get_recent_news(symbol: str, limit: int = 10) -> list[NewsArticleRespo
 
 
 @app.get("/historical-precedent", response_model=HistoricalPrecedentResponse)
-async def get_historical_precedent(query: str, top_k: int = 5) -> HistoricalPrecedentResponse:
+async def get_historical_precedent(
+    query: str,
+    top_k: int = 5,
+    symbol: str | None = None,
+    horizon_minutes: int = 1440,
+) -> HistoricalPrecedentResponse:
     if not query or not query.strip():
         raise HTTPException(status_code=422, detail="query must not be empty")
     if top_k < 1 or top_k > 20:
@@ -126,6 +133,7 @@ async def get_historical_precedent(query: str, top_k: int = 5) -> HistoricalPrec
 
     embedder: EmbeddingService = _state["embedder"]  # type: ignore[assignment]
     news_repo: NewsRepository = _state["news_repo"]  # type: ignore[assignment]
+    outcome_repo: OutcomeRepository = _state["outcome_repo"]  # type: ignore[assignment]
 
     query_vector = embedder.embed(query)
     matches = await news_repo.most_similar_articles(query_vector, limit=top_k)
@@ -136,10 +144,22 @@ async def get_historical_precedent(query: str, top_k: int = 5) -> HistoricalPrec
             matches=[],
             majority_sentiment=None,
             agreement_ratio=None,
+            average_return_pct=None,
+            return_sample_size=None,
         )
 
     label_counts = Counter(m.sentiment_label.value for m in matches)
     majority_label, majority_count = label_counts.most_common(1)[0]
+
+    average_return_pct: float | None = None
+    return_sample_size: int | None = None
+    if symbol:
+        match_uuids = [m.uuid for m in matches]
+        average_return_pct = await outcome_repo.average_return_for_similar(
+            match_uuids, symbol.upper(), horizon_minutes
+        )
+        if average_return_pct is not None:
+            return_sample_size = len(match_uuids)
 
     return HistoricalPrecedentResponse(
         query_text=query,
@@ -155,4 +175,6 @@ async def get_historical_precedent(query: str, top_k: int = 5) -> HistoricalPrec
         ],
         majority_sentiment=majority_label,
         agreement_ratio=f"{majority_count}/{len(matches)}",
+        average_return_pct=average_return_pct,
+        return_sample_size=return_sample_size,
     )

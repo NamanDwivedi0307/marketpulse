@@ -94,11 +94,14 @@ async def test_historical_precedent_rejects_invalid_top_k() -> None:
 async def test_historical_precedent_returns_empty_result_when_no_matches() -> None:
     api_main._state["embedder"] = AsyncMock(embed=lambda text: [0.1] * 384)
     api_main._state["news_repo"] = AsyncMock(most_similar_articles=AsyncMock(return_value=[]))
+    api_main._state["outcome_repo"] = AsyncMock()
 
     result = await api_main.get_historical_precedent(query="something novel")
     assert result.matches == []
     assert result.majority_sentiment is None
     assert result.agreement_ratio is None
+    assert result.average_return_pct is None
+    assert result.return_sample_size is None
 
 
 async def test_historical_precedent_computes_majority_and_agreement() -> None:
@@ -112,9 +115,36 @@ async def test_historical_precedent_computes_majority_and_agreement() -> None:
             ]
         )
     )
+    api_main._state["outcome_repo"] = AsyncMock()
 
     result = await api_main.get_historical_precedent(query="chip stocks rally")
     assert result.majority_sentiment == "negative"
     assert result.agreement_ratio == "2/3"
     assert len(result.matches) == 3
+    # no symbol passed -> outcome lookup skipped entirely
+    assert result.average_return_pct is None
+    assert result.return_sample_size is None
 
+
+async def test_historical_precedent_includes_average_return_when_symbol_given() -> None:
+    api_main._state["embedder"] = AsyncMock(embed=lambda text: [0.1] * 384)
+    api_main._state["news_repo"] = AsyncMock(
+        most_similar_articles=AsyncMock(
+            return_value=[
+                SimilarArticle("u1", "t1", SentimentLabel.NEGATIVE, 0.9, 0.8),
+                SimilarArticle("u2", "t2", SentimentLabel.POSITIVE, 0.7, 0.3),
+            ]
+        )
+    )
+    api_main._state["outcome_repo"] = AsyncMock(
+        average_return_for_similar=AsyncMock(return_value=-1.21)
+    )
+
+    result = await api_main.get_historical_precedent(
+        query="chip stocks rally", symbol="AAPL", horizon_minutes=1440
+    )
+    assert result.average_return_pct == -1.21
+    assert result.return_sample_size == 2
+    api_main._state["outcome_repo"].average_return_for_similar.assert_awaited_once_with(
+        ["u1", "u2"], "AAPL", 1440
+    )
