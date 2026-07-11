@@ -29,8 +29,6 @@ class FinnhubSettings(BaseSettings):
     api_key: str = Field(default="", description="Finnhub API key, free tier")
     base_url: HttpUrl = Field(default=HttpUrl("https://finnhub.io/api/v1"))
     ws_url: str = Field(default="wss://ws.finnhub.io")
-    # Free tier: 60 calls/minute. Kept conservative to leave headroom for
-    # retries without tripping the provider's own rate limiter.
     max_requests_per_minute: int = Field(default=50, gt=0, le=60)
 
 
@@ -39,8 +37,6 @@ class AlphaVantageSettings(BaseSettings):
 
     api_key: str = Field(default="")
     base_url: HttpUrl = Field(default=HttpUrl("https://www.alphavantage.co/query"))
-    # Free tier is 25 requests/day as of 2024 -- this is a fallback source,
-    # not a primary feed. Treat it as scarce.
     max_requests_per_day: int = Field(default=25, gt=0)
 
 
@@ -69,6 +65,15 @@ class DatabaseSettings(BaseSettings):
         )
 
 
+class ApiSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # Shared-secret auth for the read API. Empty by default so local dev
+    # without a .env entry doesn't hard-fail -- but an empty key means the
+    # API refuses all requests (see main.py), it does not mean "no auth".
+    api_key: str = Field(default="")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -83,6 +88,7 @@ class Settings(BaseSettings):
     alpha_vantage: AlphaVantageSettings = Field(default_factory=AlphaVantageSettings)
     marketaux: MarketauxSettings = Field(default_factory=MarketauxSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    api: ApiSettings = Field(default_factory=ApiSettings)
 
     @field_validator("log_level")
     @classmethod
@@ -94,11 +100,6 @@ class Settings(BaseSettings):
         return normalized
 
     def require_finnhub(self) -> None:
-        """Fail loudly and early if a code path needs Finnhub but no key is set.
-
-        Called at the top of anything that actually hits the network, rather
-        than letting an empty key turn into a 401 several layers down.
-        """
         if not self.finnhub.api_key:
             raise RuntimeError(
                 "FINNHUB_API_KEY is not set. Get a free key at "
@@ -115,10 +116,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return the process-wide Settings singleton.
-
-    lru_cache means the .env file is parsed once per process, not once per
-    call site. Tests that need different settings should call
-    get_settings.cache_clear() after monkeypatching environment variables.
-    """
     return Settings()

@@ -19,7 +19,11 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI, HTTPException
 
-from marketpulse.api.middleware import RateLimitMiddleware, RequestLoggingMiddleware
+from marketpulse.api.middleware import (
+    ApiKeyAuthMiddleware,
+    RateLimitMiddleware,
+    RequestLoggingMiddleware,
+)
 from marketpulse.api.schemas import (
     HistoricalPrecedentResponse,
     NewsArticleResponse,
@@ -36,10 +40,6 @@ from marketpulse.storage.quote_repository import QuoteRepository
 
 logger = structlog.get_logger(__name__)
 
-# Populated at startup via the lifespan context below -- module-level state
-# is the pragmatic choice here (FastAPI's own dependency-override pattern is
-# more testable, but adds real complexity for a single-developer read API
-# with no auth/multi-tenancy concerns yet).
 _state: dict[str, object] = {}
 
 
@@ -53,9 +53,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _state["quote_repo"] = QuoteRepository(pool)
     _state["news_repo"] = NewsRepository(pool)
     _state["outcome_repo"] = OutcomeRepository(pool)
-    # Embedding model loaded once at startup, not per-request -- loading it
-    # per-request would add multi-second latency to every historical-match
-    # query, defeating the purpose of an API.
     _state["embedder"] = EmbeddingService()
 
     logger.info("api_startup_complete")
@@ -72,6 +69,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(RateLimitMiddleware, max_requests=30, window_seconds=60.0)
+app.add_middleware(ApiKeyAuthMiddleware, expected_key=get_settings().api.api_key)
 app.add_middleware(RequestLoggingMiddleware)
 
 

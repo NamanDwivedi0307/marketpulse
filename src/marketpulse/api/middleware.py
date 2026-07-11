@@ -1,4 +1,4 @@
-"""API middleware: request logging and basic rate limiting.
+"""API middleware: request logging, rate limiting, and API key auth.
 
 Rate limiting here is a simple in-memory sliding window, keyed by client
 IP -- adequate for a single-instance API. A multi-instance deployment would
@@ -9,6 +9,7 @@ doesn't have yet, and adding it now would be complexity without a need.
 
 from __future__ import annotations
 
+import hmac
 import time
 from collections import defaultdict
 
@@ -53,9 +54,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        # Health checks are exempt -- monitoring/orchestration tools poll
-        # these frequently and legitimately, and limiting them risks a
-        # false "unhealthy" signal during normal operation.
         if request.url.path == "/health":
             return await call_next(request)
 
@@ -72,6 +70,36 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return Response(
                 content='{"detail":"Rate limit exceeded. Try again shortly."}',
                 status_code=429,
+                media_type="application/json",
+            )
+
+        return await call_next(request)
+
+
+class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
+    """Requires a valid X-API-Key header on every request except /health.
+
+    Uses constant-time comparison (hmac.compare_digest) rather than == to
+    avoid leaking key length/prefix info via response-timing side channels
+    -- low-stakes for a single-developer project, but it's free to do right.
+    """
+
+    def __init__(self, app: ASGIApp, expected_key: str) -> None:
+        super().__init__(app)
+        self._expected_key = expected_key
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        if request.url.path in ("/health", "/docs", "/openapi.json", "/redoc"):
+            return await call_next(request)
+
+        provided_key = request.headers.get("x-api-key", "")
+
+        if not self._expected_key or not hmac.compare_digest(provided_key, self._expected_key):
+            return Response(
+                content='{"detail":"Missing or invalid API key."}',
+                status_code=401,
                 media_type="application/json",
             )
 
