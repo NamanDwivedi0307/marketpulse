@@ -20,6 +20,7 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY src ./src
 COPY scripts ./scripts
+COPY models ./models
 
 ENV PATH="/app/.venv/bin:$PATH" \
     ENVIRONMENT=production

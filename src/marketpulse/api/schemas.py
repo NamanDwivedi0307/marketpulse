@@ -49,6 +49,16 @@ class HistoricalPrecedentResponse(BaseModel):
     return_sample_size: int | None = None
 
 
+class FusionScoreResponse(BaseModel):
+    symbol: str
+    fusion_score: float
+    label: str
+    confidence: float
+    sentiment_component: float | None
+    precedent_component: float | None
+    forecast_component: float | None
+
+
 class ErrorResponse(BaseModel):
     detail: str
 

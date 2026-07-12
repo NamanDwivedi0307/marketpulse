@@ -25,6 +25,7 @@ from marketpulse.api.middleware import (
     RequestLoggingMiddleware,
 )
 from marketpulse.api.schemas import (
+    FusionScoreResponse,
     HistoricalPrecedentResponse,
     NewsArticleResponse,
     QuoteResponse,
@@ -32,6 +33,8 @@ from marketpulse.api.schemas import (
 )
 from marketpulse.config.settings import get_settings
 from marketpulse.models.embeddings import EmbeddingService
+from marketpulse.models.forecast import ForecastService
+from marketpulse.models.fusion_score import compute_fusion_score
 from marketpulse.storage.migrator import run_migrations
 from marketpulse.storage.news_repository import NewsRepository
 from marketpulse.storage.outcome_repository import OutcomeRepository
@@ -54,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _state["news_repo"] = NewsRepository(pool)
     _state["outcome_repo"] = OutcomeRepository(pool)
     _state["embedder"] = EmbeddingService()
+    _state["forecast_service"] = ForecastService()
 
     logger.info("api_startup_complete")
     yield
@@ -175,4 +179,67 @@ async def get_historical_precedent(
         agreement_ratio=f"{majority_count}/{len(matches)}",
         average_return_pct=average_return_pct,
         return_sample_size=return_sample_size,
+    )
+
+
+
+@app.get("/fusion-score/{symbol}", response_model=FusionScoreResponse)
+async def get_fusion_score(symbol: str) -> FusionScoreResponse:
+    """Combines the three independently-built signals -- FinBERT sentiment
+    on recent news, realized historical-precedent returns, and the price-only
+    forecast model -- into one directional score for the symbol.
+
+    Any signal that isn't available (no recent news, no similar historical
+    articles, insufficient quote history for the forecast) is simply
+    excluded from the blend rather than treated as zero/neutral -- see
+    fusion_score.py for why that distinction matters.
+    """
+    symbol = symbol.upper()
+    news_repo: NewsRepository = _state["news_repo"]  # type: ignore[assignment]
+    outcome_repo: OutcomeRepository = _state["outcome_repo"]  # type: ignore[assignment]
+    quote_repo: QuoteRepository = _state["quote_repo"]  # type: ignore[assignment]
+    forecast_service: ForecastService = _state["forecast_service"]  # type: ignore[assignment]
+
+    recent_news = await news_repo.sentiment_for_symbol(symbol, limit=1)
+    sentiment_label = recent_news[0][1] if recent_news else None
+    # sentiment_for_symbol doesn't return confidence directly -- article's
+    # own recorded confidence isn't exposed by that method, so we treat a
+    # present label as reasonably confident. Revisit if sentiment_confidence
+    # becomes available on this query path.
+    sentiment_confidence = 0.75 if sentiment_label else None
+
+    average_precedent_return_pct: float | None = None
+    # Historical precedent needs an embedding to search by -- reuse the most
+    # recent article's title as the query text via the embedder already in
+    # _state, mirroring how /historical-precedent does it.
+    embedder: EmbeddingService = _state["embedder"]  # type: ignore[assignment]
+    if recent_news:
+        recent_article, _ = recent_news[0]
+        query_vector = embedder.embed(recent_article.title)
+        similar_articles = await news_repo.most_similar_articles(query_vector, limit=5)
+        if similar_articles:
+            match_uuids = [m.uuid for m in similar_articles]
+            average_precedent_return_pct = await outcome_repo.average_return_for_similar(
+                match_uuids, symbol, horizon_minutes=1440
+            )
+
+    recent_quotes = await quote_repo.recent_for_symbol(symbol, limit=30)
+    forecast_return_pct = forecast_service.predict_next_day_return(recent_quotes)
+
+    result = compute_fusion_score(
+        symbol=symbol,
+        sentiment_label=sentiment_label,
+        sentiment_confidence=sentiment_confidence,
+        average_precedent_return_pct=average_precedent_return_pct,
+        forecast_return_pct=forecast_return_pct,
+    )
+
+    return FusionScoreResponse(
+        symbol=result.symbol,
+        fusion_score=result.fusion_score,
+        label=result.label,
+        confidence=result.confidence,
+        sentiment_component=result.sentiment_component,
+        precedent_component=result.precedent_component,
+        forecast_component=result.forecast_component,
     )

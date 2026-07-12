@@ -98,6 +98,48 @@ class QuoteRepository:
         )
         return int(result)
 
+    async def recent_for_symbol(self, symbol: str, limit: int = 30) -> list[Quote]:
+        """Most recent `limit` quotes for a symbol, oldest first.
+
+        Oldest-first ordering matters for callers computing rolling
+        technical features (momentum, volatility) -- those need
+        chronological order, not most-recent-first.
+        """
+        # DISTINCT ON (quoted_at::date) collapses same-day duplicate polls
+        # down to one row per calendar day (the latest poll that day) --
+        # without this, a symbol polled every 60s on a day when the
+        # upstream price snapshot doesn't change yields dozens of identical
+        # rows for one date, silently starving rolling-window feature
+        # calculations of the distinct trading days they actually need.
+        rows = await self._pool.fetch(
+            """
+            SELECT DISTINCT ON (quoted_at::date)
+                symbol, current_price, change, percent_change,
+                high_of_day, low_of_day, open_price, previous_close, quoted_at
+            FROM quotes
+            WHERE symbol = $1
+            ORDER BY quoted_at::date DESC, quoted_at DESC
+            LIMIT $2
+            """,
+            symbol,
+            limit,
+        )
+        quotes = [
+            Quote(
+                symbol=row["symbol"],
+                c=row["current_price"],
+                d=row["change"],
+                dp=row["percent_change"],
+                h=row["high_of_day"],
+                l=row["low_of_day"],
+                o=row["open_price"],
+                pc=row["previous_close"],
+                t=row["quoted_at"],
+            )
+            for row in rows
+        ]
+        return list(reversed(quotes))
+
     async def quote_at_or_after(self, symbol: str, timestamp: datetime) -> Quote | None:
         """The earliest quote for symbol at or after the given timestamp.
 
