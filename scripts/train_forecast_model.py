@@ -94,7 +94,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     boundary between symbols, producing nonsense features.
     """
     out_frames = []
-    for symbol, group in df.groupby("symbol"):
+    for _symbol, group in df.groupby("symbol"):
         g = group.sort_values("date").reset_index(drop=True).copy()
 
         g["return_1d"] = g["close"].pct_change(1) * 100
